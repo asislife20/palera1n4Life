@@ -1,227 +1,123 @@
-name: Build palera1n (Linux ARMEL)
+name: build-linux-armel
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
-  build-linux-armel:
+  build:
     runs-on: ubuntu-latest
 
     env:
+      ARCH: armel
+      SYSROOT: ${{ github.workspace }}/sysroot
+      HOST: armel-linux-musleabi
       PREFIX: /usr/local
-      LIBPLIST_COMMIT: 2117b8fdb6b4096455bd2041a63e59a028120136
-      LIBIMOBILEDEVICE_GLUE_COMMIT: 362f7848ac89b74d9dd113b38b51ecb601f76094
-      LIBIRECOVERY_COMMIT: 7ce02c347b7c26e59498e6af31c9da51018d0fa1
-      LIBIMOBILEDEVICE_COMMIT: ed0d66d0341562731bb19928dfe48155509fa7a7
-      LIBUSBMUXD_COMMIT: a7f0543fb1ecb20ac7121c0fd77297200e0e43fc
+      DESTDIR: ${{ github.workspace }}/sysroot
 
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # ----------------------------------------------------
-      # Install dependencies
-      # ----------------------------------------------------
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            pkg-config autoconf automake autopoint libtool \
-            build-essential mandoc libusb-1.0-0-dev libusb-dev \
-            libreadline-dev
-          sudo pip3 install jsonschema jinja2
+            build-essential autoconf automake libtool pkg-config \
+            libusb-1.0-0-dev libreadline-dev
 
-      # ----------------------------------------------------
-      # Define retry()
-      # ----------------------------------------------------
-      - name: Create retry()
+      - name: Create sysroot dirs
         run: |
-          echo 'retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }' > retry.sh
+          mkdir -p "$SYSROOT/usr/local"
+          mkdir -p "$SYSROOT/usr/local/include"
+          mkdir -p "$SYSROOT/usr/local/lib"
+          mkdir -p "$SYSROOT/usr/local/bin"
 
-      # ----------------------------------------------------
-      # Download toolchain
-      # ----------------------------------------------------
-      - name: Download ARMEL toolchain
-        shell: bash
+      - name: Create retry wrapper
+        run: |
+          cat << 'EOF' > retry.sh
+          retry() {
+            for i in {1..5}; do
+              "$@" && return 0
+              echo "Retry $i failed, waiting..."
+              sleep 5
+            done
+            echo "All retries failed!"
+            return 1
+          }
+          export -f retry
+          EOF
+
+      - name: Source retry
         run: |
           source retry.sh
-          retry curl -L -o dep_root_armel.tgz \
-            https://cdn.nickchan.lol/palera1n/c-rewrite/releases/v2.2.1/build_depends/dep_root_armel-linux-musleabi.tgz
 
-      - name: Extract toolchain
+      - name: Define .la patcher (V3)
         run: |
-          mkdir -p dep_root
-          tar -xzf dep_root_armel.tgz -C dep_root
+          cat << 'EOF' > patch_la.sh
+          patch_la() {
+            echo "Patching all .la files inside $DESTDIR/usr/local/lib ..."
+            find "$DESTDIR/usr/local/lib" -name "*.la" | while read la; do
+              echo "Patching $la"
+              sed -i "s|libdir='/usr/local/lib'|libdir='$DESTDIR/usr/local/lib'|" "$la"
+              sed -i "s|/usr/local/lib|$DESTDIR/usr/local/lib|g" "$la"
+            done
+          }
+          export -f patch_la
+          EOF
 
-      # ----------------------------------------------------
-      # Configure cross environment
-      # ----------------------------------------------------
-      - name: Setup cross environment
+      - name: Source patch_la
         run: |
-          echo "TOOLCHAIN_DIR=$(pwd)/dep_root" >> $GITHUB_ENV
-          echo "$(pwd)/dep_root/bin" >> $GITHUB_PATH
-          echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
-          echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$(pwd)/sysroot/usr/local/lib/pkgconfig:$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
-          echo "CFLAGS=-I$(pwd)/dep_root/usr/local/include -I$(pwd)/sysroot/usr/local/include" >> $GITHUB_ENV
-          echo "LDFLAGS=-L$(pwd)/dep_root/usr/local/lib -L$(pwd)/sysroot/usr/local/lib" >> $GITHUB_ENV
+          source patch_la.sh
 
-      # ----------------------------------------------------
-      # Helper to patch .la libdir paths
-      # ----------------------------------------------------
-      - name: Create patch-la script
-        run: |
-          echo 'patch_la() { sed -i "s|libdir='\''/usr/local/lib'\''|libdir='\''$DESTDIR/usr/local/lib'\''|" "$DESTDIR"/usr/local/lib/*.la; }' > patch_la.sh
+      ####################################################################
+      # BUILD: LIBPLIST
+      ####################################################################
+      - name: Clone libplist
+        run: retry git clone https://github.com/libimobiledevice/libplist
 
-      # ----------------------------------------------------
-      # Build libplist
-      # ----------------------------------------------------
       - name: Build libplist
-        shell: bash
         run: |
-          source retry.sh
-          retry git clone https://github.com/libimobiledevice/libplist
           cd libplist
-          git reset --hard $LIBPLIST_COMMIT
-          autoreconf -fi
-          ./configure \
-            --host=armel-linux-musleabi \
-            --prefix=/usr/local \
-            --disable-shared \
-            --enable-static
+          ./autogen.sh --host=$HOST --prefix=$PREFIX
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
-          bash ../patch_la.sh
+          patch_la
 
-      # ----------------------------------------------------
-      # Build libimobiledevice-glue
-      # ----------------------------------------------------
-      - name: Build libimobiledevice-glue
-        shell: bash
+      ####################################################################
+      # BUILD: libimobiledevice-glue
+      ####################################################################
+      - name: Clone glue
+        run: retry git clone https://github.com/libimobiledevice/libimobiledevice-glue
+
+      - name: Build glue
         run: |
-          source retry.sh
-          retry git clone https://github.com/libimobiledevice/libimobiledevice-glue
           cd libimobiledevice-glue
-          git reset --hard $LIBIMOBILEDEVICE_GLUE_COMMIT
-          autoreconf -fi
-
-          export CFLAGS="$CFLAGS -I$DESTDIR/usr/local/include"
-          export LDFLAGS="$LDFLAGS -L$DESTDIR/usr/local/lib"
-
-          ./configure \
-            --host=armel-linux-musleabi \
-            --prefix=/usr/local \
-            --disable-shared \
-            --enable-static
-
+          PKG_CONFIG_PATH="$DESTDIR/usr/local/lib/pkgconfig" \
+          ./autogen.sh --host=$HOST --prefix=$PREFIX
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
-          bash ../patch_la.sh
+          patch_la
 
-      # ----------------------------------------------------
-      # Build libirecovery (libusb fix)
-      # ----------------------------------------------------
+      ####################################################################
+      # BUILD: libirecovery
+      ####################################################################
+      - name: Clone libirecovery
+        run: retry git clone https://github.com/libimobiledevice/libirecovery
+
       - name: Build libirecovery
-        shell: bash
         run: |
-          source retry.sh
-          retry git clone https://github.com/libimobiledevice/libirecovery
           cd libirecovery
-          git reset --hard $LIBIRECOVERY_COMMIT
-          autoreconf -fi
-
-          export libusb_CFLAGS="-I/usr/include/libusb-1.0"
-          export libusb_LIBS="-lusb-1.0"
-          export CFLAGS="$CFLAGS -I/usr/include/libusb-1.0"
-          export LDFLAGS="$LDFLAGS -lusb-1.0"
-
-          ./configure \
-            --host=armel-linux-musleabi \
-            --prefix=/usr/local \
-            --disable-shared \
-            --enable-static
-
+          PKG_CONFIG_PATH="$DESTDIR/usr/local/lib/pkgconfig" \
+          ./autogen.sh --host=$HOST --prefix=$PREFIX
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
-          bash ../patch_la.sh
+          patch_la
 
-      # ----------------------------------------------------
-      # Build libimobiledevice
-      # ----------------------------------------------------
-      - name: Build libimobiledevice
-        shell: bash
-        run: |
-          source retry.sh
-          retry git clone https://github.com/libimobiledevice/libimobiledevice
-          cd libimobiledevice
-          git reset --hard $LIBIMOBILEDEVICE_COMMIT
-          autoreconf -fi
-
-          export CFLAGS="$CFLAGS -I$DESTDIR/usr/local/include"
-          export LDFLAGS="$LDFLAGS -L$DESTDIR/usr/local/lib"
-
-          ./configure \
-            --host=armel-linux-musleabi \
-            --prefix=/usr/local \
-            --disable-shared \
-            --enable-static \
-            --with-mbedtls \
-            --disable-debug \
-            --disable-wireless-pairing
-
-          make -j$(nproc)
-          make install DESTDIR="$DESTDIR"
-          bash ../patch_la.sh
-
-      # ----------------------------------------------------
-      # Build libusbmuxd
-      # ----------------------------------------------------
-      - name: Build libusbmuxd
-        shell: bash
-        run: |
-          source retry.sh
-          retry git clone https://github.com/libimobiledevice/libusbmuxd
-          cd libusbmuxd
-          git reset --hard $LIBUSBMUXD_COMMIT
-          autoreconf -fi
-
-          export CFLAGS="$CFLAGS -I$DESTDIR/usr/local/include"
-          export LDFLAGS="$LDFLAGS -L$DESTDIR/usr/local/lib"
-
-          ./configure \
-            --host=armel-linux-musleabi \
-            --prefix=/usr/local \
-            --disable-shared \
-            --enable-static
-
-          make -j$(nproc)
-          make install DESTDIR="$DESTDIR"
-          bash ../patch_la.sh
-
-      # ----------------------------------------------------
-      # Merge sysroot -> toolchain
-      # ----------------------------------------------------
-      - name: Merge sysroot into dep_root
-        run: |
-          cp -a sysroot/usr/local/include/* dep_root/usr/local/include/ || true
-          cp -a sysroot/usr/local/lib/* dep_root/usr/local/lib/ || true
-
-      # ----------------------------------------------------
-      # Build palera1n
-      # ----------------------------------------------------
-      - name: Build palera1n (linux-armel)
-        shell: bash
-        run: |
-          make clean || true
-          make linux-armel
-
-      # ----------------------------------------------------
-      # Upload final binary
-      # ----------------------------------------------------
-      - name: Upload palera1n artifact
+      ####################################################################
+      # OUTPUT
+      ####################################################################
+      - name: Archive sysroot
         uses: actions/upload-artifact@v4
         with:
-          name: palera1n-linux-armel
-          path: palera1n
+          name: linux-armel-libs
+          path: ${{ github.workspace }}/sysroot
