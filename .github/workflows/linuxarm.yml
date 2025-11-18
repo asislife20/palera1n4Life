@@ -11,7 +11,6 @@ jobs:
 
     env:
       PREFIX: /usr/local
-      MBEDTLS_VERSION: 3.5.2
       LIBPLIST_COMMIT: 2117b8fdb6b4096455bd2041a63e59a028120136
       LIBIMOBILEDEVICE_GLUE_COMMIT: 362f7848ac89b74d9dd113b38b51ecb601f76094
       LIBIRECOVERY_COMMIT: 7ce02c347b7c26e59498e6af31c9da51018d0fa1
@@ -22,28 +21,28 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # -----------------------------------------
-      # Install system dependencies
-      # -----------------------------------------
+      # ----------------------------------------------------
+      # Install dependencies
+      # ----------------------------------------------------
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             pkg-config autoconf automake autopoint libtool \
-            build-essential mandoc libusb-1.0-0-dev \
-            libreadline-dev libusb-dev
+            build-essential mandoc libusb-1.0-0-dev libusb-dev \
+            libreadline-dev
           sudo pip3 install jsonschema jinja2
 
-      # -----------------------------------------
-      # Create retry() helper
-      # -----------------------------------------
+      # ----------------------------------------------------
+      # Define retry()
+      # ----------------------------------------------------
       - name: Create retry()
         run: |
           echo 'retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }' > retry.sh
 
-      # -----------------------------------------
+      # ----------------------------------------------------
       # Download toolchain
-      # -----------------------------------------
+      # ----------------------------------------------------
       - name: Download ARMEL toolchain
         shell: bash
         run: |
@@ -56,22 +55,29 @@ jobs:
           mkdir -p dep_root
           tar -xzf dep_root_armel.tgz -C dep_root
 
-      # -----------------------------------------
-      # Setup cross environment
-      # -----------------------------------------
+      # ----------------------------------------------------
+      # Configure cross environment
+      # ----------------------------------------------------
       - name: Setup cross environment
         run: |
           echo "TOOLCHAIN_DIR=$(pwd)/dep_root" >> $GITHUB_ENV
           echo "$(pwd)/dep_root/bin" >> $GITHUB_PATH
           echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
+          echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$(pwd)/sysroot/usr/local/lib/pkgconfig:$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
           echo "CFLAGS=-I$(pwd)/dep_root/usr/local/include -I$(pwd)/sysroot/usr/local/include" >> $GITHUB_ENV
           echo "LDFLAGS=-L$(pwd)/dep_root/usr/local/lib -L$(pwd)/sysroot/usr/local/lib" >> $GITHUB_ENV
-          echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
 
-      # -----------------------------------------
+      # ----------------------------------------------------
+      # Helper to patch .la libdir paths
+      # ----------------------------------------------------
+      - name: Create patch-la script
+        run: |
+          echo 'patch_la() { sed -i "s|libdir='\''/usr/local/lib'\''|libdir='\''$DESTDIR/usr/local/lib'\''|" "$DESTDIR"/usr/local/lib/*.la; }' > patch_la.sh
+
+      # ----------------------------------------------------
       # Build libplist
-      # -----------------------------------------
+      # ----------------------------------------------------
       - name: Build libplist
         shell: bash
         run: |
@@ -87,10 +93,11 @@ jobs:
             --enable-static
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
+          bash ../patch_la.sh
 
-      # -----------------------------------------
+      # ----------------------------------------------------
       # Build libimobiledevice-glue
-      # -----------------------------------------
+      # ----------------------------------------------------
       - name: Build libimobiledevice-glue
         shell: bash
         run: |
@@ -111,10 +118,11 @@ jobs:
 
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
+          bash ../patch_la.sh
 
-      # -----------------------------------------
-      # Build libirecovery (libusb fix applied)
-      # -----------------------------------------
+      # ----------------------------------------------------
+      # Build libirecovery (libusb fix)
+      # ----------------------------------------------------
       - name: Build libirecovery
         shell: bash
         run: |
@@ -124,13 +132,11 @@ jobs:
           git reset --hard $LIBIRECOVERY_COMMIT
           autoreconf -fi
 
-          # 🔥 FIX: Force correct libusb include & link flags
           export libusb_CFLAGS="-I/usr/include/libusb-1.0"
           export libusb_LIBS="-lusb-1.0"
           export CFLAGS="$CFLAGS -I/usr/include/libusb-1.0"
           export LDFLAGS="$LDFLAGS -lusb-1.0"
 
-          PKG_CONFIG_PATH="$DESTDIR/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" \
           ./configure \
             --host=armel-linux-musleabi \
             --prefix=/usr/local \
@@ -139,10 +145,11 @@ jobs:
 
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
+          bash ../patch_la.sh
 
-      # -----------------------------------------
+      # ----------------------------------------------------
       # Build libimobiledevice
-      # -----------------------------------------
+      # ----------------------------------------------------
       - name: Build libimobiledevice
         shell: bash
         run: |
@@ -166,10 +173,11 @@ jobs:
 
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
+          bash ../patch_la.sh
 
-      # -----------------------------------------
+      # ----------------------------------------------------
       # Build libusbmuxd
-      # -----------------------------------------
+      # ----------------------------------------------------
       - name: Build libusbmuxd
         shell: bash
         run: |
@@ -190,27 +198,28 @@ jobs:
 
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
+          bash ../patch_la.sh
 
-      # -----------------------------------------
-      # Merge sysroot → toolchain
-      # -----------------------------------------
+      # ----------------------------------------------------
+      # Merge sysroot -> toolchain
+      # ----------------------------------------------------
       - name: Merge sysroot into dep_root
         run: |
           cp -a sysroot/usr/local/include/* dep_root/usr/local/include/ || true
           cp -a sysroot/usr/local/lib/* dep_root/usr/local/lib/ || true
 
-      # -----------------------------------------
+      # ----------------------------------------------------
       # Build palera1n
-      # -----------------------------------------
+      # ----------------------------------------------------
       - name: Build palera1n (linux-armel)
         shell: bash
         run: |
           make clean || true
           make linux-armel
 
-      # -----------------------------------------
-      # Upload binary
-      # -----------------------------------------
+      # ----------------------------------------------------
+      # Upload final binary
+      # ----------------------------------------------------
       - name: Upload palera1n artifact
         uses: actions/upload-artifact@v4
         with:
