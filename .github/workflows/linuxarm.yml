@@ -1,0 +1,76 @@
+name: Build palera1n (Linux ARMEL Minimal)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-linux-armel:
+    runs-on: ubuntu-latest
+    env:
+      PREFIX: /usr/local
+      MBEDTLS_VERSION: 3.5.2
+      LIBPLIST_COMMIT: 2117b8fdb6b4096455bd2041a63e59a028120136
+      LIBIMOBILEDEVICE_GLUE_COMMIT: 362f7848ac89b74d9dd113b38b51ecb601f76094
+      LIBIRECOVERY_COMMIT: 7ce02c347b7c26e59498e6af31c9da51018d0fa1
+      LIBIMOBILEDEVICE_COMMIT: ed0d66d0341562731bb19928dfe48155509fa7a7
+      LIBUSBMUXD_COMMIT: a7f0543fb1ecb20ac7121c0fd77297200e0e43fc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config autoconf automake autopoint mandoc libtool build-essential
+          sudo pip3 install jsonschema jinja2
+
+      ###########################################################
+      # 1. Download and extract your ARMEL toolchain
+      ###########################################################
+
+      - name: Download ARMEL toolchain
+        run: |
+          curl -L -o dep_root_armel-linux-musleabi.tgz \
+            https://cdn.nickchan.lol/palera1n/c-rewrite/releases/v2.2.1/build_depends/dep_root_armel-linux-musleabi.tgz
+
+      - name: List downloaded files
+        run: ls -lh
+
+      - name: Extract toolchain
+        run: |
+          mkdir -p dep_root
+          tar -xzf dep_root_armel-linux-musleabi.tgz -C dep_root
+
+      - name: Setup cross-compile environment
+        run: |
+          echo "TOOLCHAIN_DIR=$(pwd)/dep_root" >> $GITHUB_ENV
+          echo "$(pwd)/dep_root/bin" >> $GITHUB_PATH
+
+          echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+
+          echo "CFLAGS=-g -I$(pwd)/dep_root/usr/local/include -L$(pwd)/dep_root/usr/local/lib -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
+          echo "CXXFLAGS=-g -I$(pwd)/dep_root/usr/local/include -L$(pwd)/dep_root/usr/local/lib -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
+          echo "LDFLAGS=-g -L$(pwd)/dep_root/usr/local/lib" >> $GITHUB_ENV
+
+          echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
+          echo "ARCH_NAME=armel" >> $GITHUB_ENV
+          echo "CHECKRA1N_NAME=linux-armel" >> $GITHUB_ENV
+
+      ###########################################################
+      # 2. Build libplist
+      ###########################################################
+
+      - name: Clone libplist
+        run: |
+          git clone --depth=1 https://github.com/libimobiledevice/libplist
+          cd libplist && git fetch origin $LIBPLIST_COMMIT && git reset --hard $LIBPLIST_COMMIT
+
+      - name: Build libplist
+        run: |
+          cd libplist
+          autoreconf -fiv
+          ./configure --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --ena
