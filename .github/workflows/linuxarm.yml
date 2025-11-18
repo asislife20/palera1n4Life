@@ -47,6 +47,17 @@ jobs:
         run: |
           mkdir -p dep_root
           tar -xzf dep_root_armel.tgz -C dep_root
+ 
+      - name: Debug libusb location
+        run: |
+          echo "Searching for libusb.h..."
+          find dep_root -name "libusb.h" -type f -maxdepth 6 || true
+
+          echo "Searching for libusb-1.0 directory..."
+          find dep_root -name "libusb-1.0" -type d -maxdepth 6 || true
+
+          echo "Listing include directories..."
+          find dep_root -type d -path "*/include*" -maxdepth 6
 
       ######################################################
       # 2. Configure cross environment (FIXED)
