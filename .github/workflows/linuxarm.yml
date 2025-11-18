@@ -35,12 +35,11 @@ jobs:
           sudo pip3 install jsonschema jinja2
 
       # -----------------------------------------
-      # Define retry() function globally
+      # Create retry() helper
       # -----------------------------------------
-      - name: Define retry()
+      - name: Create retry()
         run: |
           echo 'retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }' > retry.sh
-          cat retry.sh
 
       # -----------------------------------------
       # Download toolchain
@@ -58,15 +57,14 @@ jobs:
           tar -xzf dep_root_armel.tgz -C dep_root
 
       # -----------------------------------------
-      # Setup cross compile env
+      # Setup cross environment
       # -----------------------------------------
       - name: Setup cross environment
         run: |
           echo "TOOLCHAIN_DIR=$(pwd)/dep_root" >> $GITHUB_ENV
           echo "$(pwd)/dep_root/bin" >> $GITHUB_PATH
           echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
-          echo "PKG_CONFIG_LIBDIR=$(pwd)/sysroot/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$(pwd)/sysroot/usr/local/lib/pkgconfig:$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
           echo "CFLAGS=-I$(pwd)/dep_root/usr/local/include -I$(pwd)/sysroot/usr/local/include" >> $GITHUB_ENV
           echo "LDFLAGS=-L$(pwd)/dep_root/usr/local/lib -L$(pwd)/sysroot/usr/local/lib" >> $GITHUB_ENV
           echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
@@ -102,7 +100,6 @@ jobs:
           git reset --hard $LIBIMOBILEDEVICE_GLUE_COMMIT
           autoreconf -fi
 
-          # FIX: ensure plist headers are visible
           export CFLAGS="$CFLAGS -I$DESTDIR/usr/local/include"
           export LDFLAGS="$LDFLAGS -L$DESTDIR/usr/local/lib"
 
@@ -116,7 +113,7 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       # -----------------------------------------
-      # Build libirecovery (needs libusb headers)
+      # Build libirecovery (libusb fix applied)
       # -----------------------------------------
       - name: Build libirecovery
         shell: bash
@@ -125,12 +122,14 @@ jobs:
           retry git clone https://github.com/libimobiledevice/libirecovery
           cd libirecovery
           git reset --hard $LIBIRECOVERY_COMMIT
-
-          # FIX: ensure libusb headers resolve
-          export CFLAGS="$CFLAGS -I/usr/include/libusb-1.0 -I$DESTDIR/usr/local/include"
-          export LDFLAGS="$LDFLAGS -L$DESTDIR/usr/local/lib"
-
           autoreconf -fi
+
+          # 🔥 FIX: Force correct libusb include & link flags
+          export libusb_CFLAGS="-I/usr/include/libusb-1.0"
+          export libusb_LIBS="-lusb-1.0"
+          export CFLAGS="$CFLAGS -I/usr/include/libusb-1.0"
+          export LDFLAGS="$LDFLAGS -lusb-1.0"
+
           PKG_CONFIG_PATH="$DESTDIR/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" \
           ./configure \
             --host=armel-linux-musleabi \
