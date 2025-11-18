@@ -116,8 +116,8 @@ jobs:
           git reset --hard $LIBIRECOVERY_COMMIT
           autoreconf -fi
 
-          # Correct ARMEL libusb header path + library path
-          export libusb_CFLAGS="-I$(pwd)/../dep_root/usr/include/libusb-1.0"
+          # FIX: Include BOTH libusb header paths
+          export libusb_CFLAGS="-I$(pwd)/../dep_root/usr/include -I$(pwd)/../dep_root/usr/include/libusb-1.0"
           export libusb_LIBS="-L$(pwd)/../dep_root/usr/lib -lusb-1.0"
 
           ./configure \
@@ -132,6 +132,7 @@ jobs:
 
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
+
 
       ######################################################
       # 6. Build libimobiledevice
