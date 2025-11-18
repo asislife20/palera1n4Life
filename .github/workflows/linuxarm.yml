@@ -27,7 +27,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             pkg-config autoconf automake autopoint libtool \
-            build-essential mandoc libusb-1.0-0-dev
+            build-essential mandoc libusb-1.0-0-dev \
+            libreadline-dev
           sudo pip3 install jsonschema jinja2
 
       ######################################################
