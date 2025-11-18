@@ -73,4 +73,5 @@ jobs:
         run: |
           cd libplist
           autoreconf -fiv
-          ./configure --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --ena
+          ./configure --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --enable-shared=no
+          
