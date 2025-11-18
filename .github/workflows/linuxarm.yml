@@ -32,37 +32,12 @@ jobs:
           sudo pip3 install jsonschema jinja2
 
       ######################################################
-      # Retry helper for flaky GitHub clones
-      ######################################################
-      - name: Add retry helper
-        run: |
-          retry() {
-            local n=0
-            local max=$1
-            shift
-            until "$@"; do
-              if (( n < max )); then
-                ((n++))
-                echo "Retry $n/$max failed — waiting 5 seconds..."
-                sleep 5
-              else
-                echo "ERROR: Command failed after $max retries."
-                return 1
-              fi
-            done
-          }
-          export -f retry
-
-      ######################################################
-      # 1. Download and extract ARMEL toolchain
+      # Download toolchain
       ######################################################
       - name: Download ARMEL toolchain
         run: |
           curl -L -o dep_root_armel.tgz \
             https://cdn.nickchan.lol/palera1n/c-rewrite/releases/v2.2.1/build_depends/dep_root_armel-linux-musleabi.tgz
-
-      - name: Verify download
-        run: ls -lh
 
       - name: Extract toolchain
         run: |
@@ -70,7 +45,7 @@ jobs:
           tar -xzf dep_root_armel.tgz -C dep_root
 
       ######################################################
-      # 2. Configure cross environment
+      # Setup environment
       ######################################################
       - name: Setup cross environment
         run: |
@@ -78,16 +53,18 @@ jobs:
           echo "$(pwd)/dep_root/bin" >> $GITHUB_PATH
           echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$(pwd)/dep_root/usr/local/lib/pkgconfig:$(pwd)/sysroot/usr/local/lib/pkgconfig" >> $GITHUB_ENV
-          echo "CFLAGS=-I$(pwd)/dep_root/usr/local/include -L$(pwd)/dep_root/usr/local/lib -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
+          echo "CFLAGS=-I$(pwd)/dep_root/usr/local/include -L$(pwd)/dep_root/usr/local/lib" >> $GITHUB_ENV
           echo "LDFLAGS=-L$(pwd)/dep_root/usr/local/lib" >> $GITHUB_ENV
           echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
 
       ######################################################
-      # 3. Build libplist
+      # Build libplist
       ######################################################
       - name: Build libplist
         run: |
-          retry 5 git clone https://github.com/libimobiledevice/libplist
+          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
+          retry git clone https://github.com/libimobiledevice/libplist
+
           cd libplist
           git reset --hard $LIBPLIST_COMMIT
           autoreconf -fi
@@ -96,11 +73,13 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       ######################################################
-      # 4. Build libimobiledevice-glue
+      # Build libimobiledevice-glue
       ######################################################
       - name: Build libimobiledevice-glue
         run: |
-          retry 5 git clone https://github.com/libimobiledevice/libimobiledevice-glue
+          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
+          retry git clone https://github.com/libimobiledevice/libimobiledevice-glue
+
           cd libimobiledevice-glue
           git reset --hard $LIBIMOBILEDEVICE_GLUE_COMMIT
           autoreconf -fi
@@ -109,11 +88,13 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       ######################################################
-      # 5. Build libusb (for ARMEL)
+      # Build libusb
       ######################################################
-      - name: Build libusb for ARMEL
+      - name: Build libusb
         run: |
-          retry 5 git clone https://github.com/libusb/libusb
+          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
+          retry git clone https://github.com/libusb/libusb
+
           cd libusb
           ./bootstrap.sh
           ./configure --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --enable-static
@@ -121,15 +102,18 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       ######################################################
-      # 6. Build libirecovery
+      # Build libirecovery
       ######################################################
       - name: Build libirecovery
         run: |
-          retry 5 git clone https://github.com/libimobiledevice/libirecovery
+          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
+          retry git clone https://github.com/libimobiledevice/libirecovery
+
           cd libirecovery
           git reset --hard $LIBIRECOVERY_COMMIT
           autoreconf -fi
-          ./configure --host=armel-linux-musleabi --prefix=/usr/local \
+          ./configure \
+            --host=armel-linux-musleabi --prefix=/usr/local \
             --disable-shared --enable-static \
             libusb_CFLAGS="-I$DESTDIR/usr/local/include/libusb-1.0" \
             libusb_LIBS="-L$DESTDIR/usr/local/lib -lusb-1.0"
@@ -137,11 +121,13 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       ######################################################
-      # 7. Build libimobiledevice
+      # Build libimobiledevice
       ######################################################
       - name: Build libimobiledevice
         run: |
-          retry 5 git clone https://github.com/libimobiledevice/libimobiledevice
+          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
+          retry git clone https://github.com/libimobiledevice/libimobiledevice
+
           cd libimobiledevice
           git reset --hard $LIBIMOBILEDEVICE_COMMIT
           autoreconf -fi
@@ -153,11 +139,13 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       ######################################################
-      # 8. Build libusbmuxd
+      # Build libusbmuxd
       ######################################################
       - name: Build libusbmuxd
         run: |
-          retry 5 git clone https://github.com/libimobiledevice/libusbmuxd
+          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
+          retry git clone https://github.com/libimobiledevice/libusbmuxd
+
           cd libusbmuxd
           git reset --hard $LIBUSBMUXD_COMMIT
           autoreconf -fi
@@ -166,15 +154,7 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       ######################################################
-      # 9. Merge sysroot into toolchain
-      ######################################################
-      - name: Merge sysroot libraries
-        run: |
-          cp -a sysroot/usr/local/lib/* dep_root/usr/local/lib/ || true
-          cp -a sysroot/usr/local/include/* dep_root/usr/local/include/ || true
-
-      ######################################################
-      # 10. Build palera1n
+      # Build palera1n
       ######################################################
       - name: Build palera1n (linux-armel)
         run: |
@@ -182,7 +162,7 @@ jobs:
           make linux-armel
 
       ######################################################
-      # 11. Upload result
+      # Upload artifact
       ######################################################
       - name: Upload palera1n artifact
         uses: actions/upload-artifact@v4
