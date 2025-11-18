@@ -27,13 +27,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             pkg-config autoconf automake autopoint libtool \
-            build-essential mandoc libusb-1.0-0-dev \
-            libreadline-dev curl
+            build-essential mandoc libusb-1.0-0-dev libreadline-dev
           sudo pip3 install jsonschema jinja2
 
-      ######################################################
-      # Download toolchain
-      ######################################################
+      #######################################################################
+      # 0. Add retry() function for all clone operations
+      #######################################################################
+      - name: Add retry function
+        run: |
+          retry() {
+            for i in {1..5}; do
+              "$@" && break
+              echo "Retry $i/5 failed — waiting 5 seconds..."
+              sleep 5
+            done
+          }
+          export -f retry
+
+      #######################################################################
+      # 1. Download & extract ARMEL toolchain
+      #######################################################################
       - name: Download ARMEL toolchain
         run: |
           curl -L -o dep_root_armel.tgz \
@@ -44,126 +57,139 @@ jobs:
           mkdir -p dep_root
           tar -xzf dep_root_armel.tgz -C dep_root
 
-      ######################################################
-      # Setup environment
-      ######################################################
-      - name: Setup cross environment
+      #######################################################################
+      # 2. Setup cross environment
+      #######################################################################
+      - name: Configure cross environment
         run: |
           echo "TOOLCHAIN_DIR=$(pwd)/dep_root" >> $GITHUB_ENV
           echo "$(pwd)/dep_root/bin" >> $GITHUB_PATH
+
           echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$(pwd)/dep_root/usr/local/lib/pkgconfig:$(pwd)/sysroot/usr/local/lib/pkgconfig" >> $GITHUB_ENV
-          echo "CFLAGS=-I$(pwd)/dep_root/usr/local/include -L$(pwd)/dep_root/usr/local/lib" >> $GITHUB_ENV
-          echo "LDFLAGS=-L$(pwd)/dep_root/usr/local/lib" >> $GITHUB_ENV
+
+          echo "PKG_CONFIG_PATH=$(pwd)/sysroot/usr/local/lib/pkgconfig:$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_LIBDIR=$(pwd)/sysroot/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+
+          echo "CFLAGS=-g -I$(pwd)/dep_root/usr/local/include -I$(pwd)/sysroot/usr/local/include" >> $GITHUB_ENV
+          echo "LDFLAGS=-g -L$(pwd)/dep_root/usr/local/lib -L$(pwd)/sysroot/usr/local/lib" >> $GITHUB_ENV
+
           echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
 
-      ######################################################
-      # Build libplist
-      ######################################################
+      #######################################################################
+      # 3. Build libplist
+      #######################################################################
       - name: Build libplist
         run: |
-          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
           retry git clone https://github.com/libimobiledevice/libplist
-
           cd libplist
           git reset --hard $LIBPLIST_COMMIT
           autoreconf -fi
-          ./configure --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --enable-static
+          ./configure \
+            --host=armel-linux-musleabi \
+            --prefix=/usr/local \
+            --disable-shared --enable-static
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
 
-      ######################################################
-      # Build libimobiledevice-glue
-      ######################################################
+      #######################################################################
+      # 4. FIX — copy plist headers into toolchain
+      #######################################################################
+      - name: Fix plist header path
+        run: |
+          mkdir -p dep_root/usr/local/include
+          cp -a sysroot/usr/local/include/plist dep_root/usr/local/include/ || true
+          echo "plist headers copied:"
+          ls -R dep_root/usr/local/include/plist
+
+      #######################################################################
+      # 5. Build libimobiledevice-glue
+      #######################################################################
       - name: Build libimobiledevice-glue
         run: |
-          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
           retry git clone https://github.com/libimobiledevice/libimobiledevice-glue
-
           cd libimobiledevice-glue
           git reset --hard $LIBIMOBILEDEVICE_GLUE_COMMIT
           autoreconf -fi
-          ./configure --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --enable-static
+          ./configure \
+            --host=armel-linux-musleabi \
+            --prefix=/usr/local \
+            --disable-shared --enable-static
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
 
-      ######################################################
-      # Build libusb
-      ######################################################
-      - name: Build libusb
+      #######################################################################
+      # 6. FIX — ensure libusb headers exist for cross compiler
+      #######################################################################
+      - name: Add libusb headers to toolchain
         run: |
-          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
-          retry git clone https://github.com/libusb/libusb
+          mkdir -p dep_root/usr/local/include
+          cp -a /usr/include/libusb-1.0 dep_root/usr/local/include/ || true
+          cp -a sysroot/usr/local/include/libusb-1.0 dep_root/usr/local/include/ 2>/dev/null || true
+          echo "libusb headers:"
+          find dep_root -name "libusb.h"
 
-          cd libusb
-          ./bootstrap.sh
-          ./configure --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --enable-static
-          make -j$(nproc)
-          make install DESTDIR="$DESTDIR"
-
-      ######################################################
-      # Build libirecovery
-      ######################################################
+      #######################################################################
+      # 7. Build libirecovery
+      #######################################################################
       - name: Build libirecovery
         run: |
-          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
           retry git clone https://github.com/libimobiledevice/libirecovery
-
           cd libirecovery
           git reset --hard $LIBIRECOVERY_COMMIT
           autoreconf -fi
           ./configure \
-            --host=armel-linux-musleabi --prefix=/usr/local \
-            --disable-shared --enable-static \
-            libusb_CFLAGS="-I$DESTDIR/usr/local/include/libusb-1.0" \
-            libusb_LIBS="-L$DESTDIR/usr/local/lib -lusb-1.0"
+            --host=armel-linux-musleabi \
+            --prefix=/usr/local \
+            --disable-shared --enable-static
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
 
-      ######################################################
-      # Build libimobiledevice
-      ######################################################
+      #######################################################################
+      # 8. Build libimobiledevice
+      #######################################################################
       - name: Build libimobiledevice
         run: |
-          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
           retry git clone https://github.com/libimobiledevice/libimobiledevice
-
           cd libimobiledevice
           git reset --hard $LIBIMOBILEDEVICE_COMMIT
           autoreconf -fi
           ./configure \
-            --host=armel-linux-musleabi --prefix=/usr/local \
-            --disable-shared --enable-static --with-mbedtls \
-            --disable-debug --disable-wireless-pairing
+            --host=armel-linux-musleabi \
+            --prefix=/usr/local \
+            --disable-shared --enable-static \
+            --with-mbedtls \
+            --disable-debug \
+            --disable-wireless-pairing
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
 
-      ######################################################
-      # Build libusbmuxd
-      ######################################################
+      #######################################################################
+      # 9. Build libusbmuxd
+      #######################################################################
       - name: Build libusbmuxd
         run: |
-          retry() { for i in {1..5}; do "$@" && break || sleep 5; done; }
           retry git clone https://github.com/libimobiledevice/libusbmuxd
-
           cd libusbmuxd
           git reset --hard $LIBUSBMUXD_COMMIT
           autoreconf -fi
-          ./configure --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --enable-static
+          ./configure \
+            --host=armel-linux-musleabi \
+            --prefix=/usr/local \
+            --disable-shared --enable-static
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
 
-      ######################################################
-      # Build palera1n
-      ######################################################
+      #######################################################################
+      # 10. Build palera1n (linux-armel)
+      #######################################################################
       - name: Build palera1n (linux-armel)
         run: |
           make clean || true
           make linux-armel
 
-      ######################################################
-      # Upload artifact
-      ######################################################
+      #######################################################################
+      # 11. Upload final artifact
+      #######################################################################
       - name: Upload palera1n artifact
         uses: actions/upload-artifact@v4
         with:
