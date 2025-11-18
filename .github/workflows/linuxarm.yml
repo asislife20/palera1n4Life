@@ -109,14 +109,14 @@ jobs:
       # 5. Build libirecovery (WITH LIBUSB FIX)
       ######################################################
 
-      - name: Build libirecovery
+            - name: Build libirecovery
         run: |
           git clone https://github.com/libimobiledevice/libirecovery
           cd libirecovery
           git reset --hard $LIBIRECOVERY_COMMIT
           autoreconf -fi
 
-          # ARMEL libusb override (cross-compile fix)
+          # Proper ARMEL libusb header + library paths
           export libusb_CFLAGS="-I$(pwd)/../dep_root/usr/include/libusb-1.0"
           export libusb_LIBS="-L$(pwd)/../dep_root/usr/lib -lusb-1.0"
 
@@ -125,11 +125,14 @@ jobs:
             --prefix=/usr/local \
             --disable-shared \
             --enable-static \
+            CFLAGS="$CFLAGS $libusb_CFLAGS" \
+            LDFLAGS="$LDFLAGS $libusb_LIBS" \
             libusb_CFLAGS="$libusb_CFLAGS" \
             libusb_LIBS="$libusb_LIBS"
 
           make -j$(nproc)
           make install DESTDIR="$DESTDIR"
+
 
       ######################################################
       # 6. Build libimobiledevice
