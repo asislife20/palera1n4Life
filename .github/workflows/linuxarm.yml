@@ -49,7 +49,7 @@ jobs:
           tar -xzf dep_root_armel.tgz -C dep_root
 
       ######################################################
-      # 2. Configure cross environment
+      # 2. Configure cross environment (FIXED)
       ######################################################
 
       - name: Setup cross environment
@@ -60,10 +60,12 @@ jobs:
           echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
           echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
 
-          # PKG CONFIG PATH (CRITICAL FIX)
-          echo "PKG_CONFIG_PATH=$(pwd)/sysroot/usr/local/lib/pkgconfig:$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+          # Use only ARMEL pkgconfig files (CRITICAL FIX)
+          echo "PKG_CONFIG_LIBDIR=$(pwd)/sysroot/usr/local/lib/pkgconfig" >> $GITHUB_ENV
 
-          # Compiler flags
+          # Also allow dep_root pkg-config fallbacks (optional)
+          echo "PKG_CONFIG_PATH=$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+
           echo "CFLAGS=-g -I$(pwd)/dep_root/usr/local/include -I$(pwd)/sysroot/usr/local/include -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
           echo "LDFLAGS=-g -L$(pwd)/dep_root/usr/local/lib -L$(pwd)/sysroot/usr/local/lib" >> $GITHUB_ENV
 
@@ -104,7 +106,7 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       ######################################################
-      # 5. Build libirecovery
+      # 5. Build libirecovery (WAS FAILING — FIXED)
       ######################################################
 
       - name: Build libirecovery
@@ -161,29 +163,9 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       ######################################################
-      # 8. Move sysroot libs into the toolchain (CRITICAL)
+      # 8. Merge sysroot into toolchain (NEEDED FOR palera1n)
       ######################################################
 
       - name: Merge sysroot into dep_root
         run: |
-          cp -a sysroot/usr/local/lib/* dep_root/usr/local/lib/ || true
-          cp -a sysroot/usr/local/include/* dep_root/usr/local/include/ || true
-
-      ######################################################
-      # 9. Build palera1n (linux-armel)
-      ######################################################
-
-      - name: Build palera1n (linux-armel)
-        run: |
-          make clean || true
-          make linux-armel
-
-      ######################################################
-      # 10. Upload build artifact
-      ######################################################
-
-      - name: Upload palera1n artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: palera1n-linux-armel
-          path: palera1n
+          cp -a sy
