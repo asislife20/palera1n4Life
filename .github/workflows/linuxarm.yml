@@ -36,7 +36,7 @@ jobs:
 
       - name: Download ARMEL toolchain
         run: |
-          curl -L -o dep_root_armel-linux-musleabi.tgz \
+          curl -L -o dep_root_armel.tgz \
             https://cdn.nickchan.lol/palera1n/c-rewrite/releases/v2.2.1/build_depends/dep_root_armel-linux-musleabi.tgz
 
       - name: Verify download
@@ -45,10 +45,10 @@ jobs:
       - name: Extract toolchain
         run: |
           mkdir -p dep_root
-          tar -xzf dep_root_armel-linux-musleabi.tgz -C dep_root
+          tar -xzf dep_root_armel.tgz -C dep_root
 
       ######################################################
-      # 2. Configure cross-compilation environment
+      # 2. Configure cross environment
       ######################################################
 
       - name: Setup cross environment
@@ -57,12 +57,14 @@ jobs:
           echo "$(pwd)/dep_root/bin" >> $GITHUB_PATH
 
           echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
-
-          echo "CFLAGS=-g -I$(pwd)/dep_root/usr/local/include -L$(pwd)/dep_root/usr/local/lib -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
-          echo "LDFLAGS=-g -L$(pwd)/dep_root/usr/local/lib" >> $GITHUB_ENV
-
           echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
+
+          # PKG CONFIG PATH (CRITICAL FIX)
+          echo "PKG_CONFIG_PATH=$(pwd)/sysroot/usr/local/lib/pkgconfig:$(pwd)/dep_root/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+
+          # Compiler flags
+          echo "CFLAGS=-g -I$(pwd)/dep_root/usr/local/include -I$(pwd)/sysroot/usr/local/include -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
+          echo "LDFLAGS=-g -L$(pwd)/dep_root/usr/local/lib -L$(pwd)/sysroot/usr/local/lib" >> $GITHUB_ENV
 
       ######################################################
       # 3. Build libplist
@@ -158,21 +160,29 @@ jobs:
           make install DESTDIR="$DESTDIR"
 
       ######################################################
-      # 8. Build palera1n (release)
+      # 8. Move sysroot libs into the toolchain (CRITICAL)
+      ######################################################
+
+      - name: Merge sysroot into dep_root
+        run: |
+          cp -a sysroot/usr/local/lib/* dep_root/usr/local/lib/ || true
+          cp -a sysroot/usr/local/include/* dep_root/usr/local/include/ || true
+
+      ######################################################
+      # 9. Build palera1n (linux-armel)
       ######################################################
 
       - name: Build palera1n (linux-armel)
         run: |
           make clean || true
           make linux-armel
-          cp palera1n palera1n
 
       ######################################################
-      # 9. Upload final binary
+      # 10. Upload build artifact
       ######################################################
 
       - name: Upload palera1n artifact
         uses: actions/upload-artifact@v4
         with:
-          name: palera1n
+          name: palera1n-linux-armel
           path: palera1n
