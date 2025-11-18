@@ -24,64 +24,52 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
-          sudo apt-get remove -y libssl-dev libreadline-dev
+          sudo apt-get update
           sudo apt-get install -y pkg-config autoconf automake autopoint mandoc
           sudo pip3 install jsonschema jinja2
 
-      - name: Download toolchain checksum
+      # 🔥 Download your working toolchain (NO auth needed)
+      - name: Download ARMEL toolchain
         run: |
-          curl -u ${{ secrets.ACTIONS_RESOURCES_LOGIN }} -LO https://static.palera.in/action-resources/musl-cross/SHA512SUMS
-          echo "TOOLCHAIN_CHECKSUM=$(grep armel-linux-musleabi-cross SHA512SUMS | awk '{print $1}')" >> $GITHUB_ENV
+          curl -L \
+            -o dep_root_armel-linux-musleabi.tgz \
+            https://cdn.nickchan.lol/palera1n/c-rewrite/releases/v2.2.1/build_depends/dep_root_armel-linux-musleabi.tgz
 
-      - name: Toolchain cache
-        id: toolchain_cache
-        uses: actions/cache@v3
-        with:
-          path: armel-linux-musleabi-cross*
-          key: armel-linux-musleabi-${{ env.TOOLCHAIN_CHECKSUM }}
-
-      - name: Download toolchain
-        if: steps.toolchain_cache.outputs.cache-hit != 'true'
-        run: |
-          curl -u ${{ secrets.ACTIONS_RESOURCES_LOGIN }} -LO \
-            https://static.palera.in/action-resources/musl-cross/armel-linux-musleabi-cross.tar.zst
-
-      # ⬇⬇⬇ DEBUG BLOCK — this is the important part ⬇⬇⬇
-      - name: DEBUG — list directory contents
+      # 🔍 Debug — show directory contents
+      - name: DEBUG — List directory contents
         run: |
           echo "PWD: $(pwd)"
-          echo "--- ls -lah ---"
-          ls -lah .
-          echo "--- find (recursive) ---"
-          find . -maxdepth 3 -type f -print
-      # ⬆⬆⬆ DEBUG BLOCK — prints EVERY file so we see the real name ⬆⬆⬆
+          ls -lah
 
+      # 📦 Extract toolchain
       - name: Extract toolchain
         run: |
-          echo "Extracting toolchain..."
-          tar --zstd -xf armel-linux-musleabi-cross*.zst || \
-          tar --zstd -xf armel-linux-musleabi-cross* || \
-          echo "❌ No matching toolchain archive found!"
+          mkdir -p dep_root
+          tar -xzf dep_root_armel-linux-musleabi.tgz -C dep_root
 
+      # 🏗 Set up environment for cross-compiling
       - name: Setup environment
         run: |
-          mkdir sysroot
-          echo "$(pwd)/armel-linux-musleabi-cross/bin" >> $GITHUB_PATH
+          export TOOLCHAIN_DIR="$(pwd)/dep_root"
+          echo "${TOOLCHAIN_DIR}/bin" >> $GITHUB_PATH
 
           echo "CHECKRA1N_NAME=linux-armel" >> $GITHUB_ENV
           echo "ARCH_NAME=armel" >> $GITHUB_ENV
 
-          echo "PKG_CONFIG_PATH=$(pwd)/sysroot/usr/local/lib/pkgconfig" >> $GITHUB_ENV
-          echo "CFLAGS=-g -fdata-sections -ffunction-sections -I$(pwd)/sysroot/usr/local/include -L$(pwd)/sysroot/usr/local/lib -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
-          echo "CXXFLAGS=$CFLAGS" >> $GITHUB_ENV
-          echo "LDFLAGS=-g -Wl,--gc-sections -fdata-sections -ffunction-sections -L$(pwd)/sysroot/usr/local/lib" >> $GITHUB_ENV
-          echo "INSTALL=$(command -v install) --strip-program=armel-linux-musleabi-strip" >> $GITHUB_ENV
-          echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
-          echo "PREFIX=/usr/local" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
-          echo "CONFIGURE_ARGS=--build=x86_64-linux-gnu --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --enable-static" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${TOOLCHAIN_DIR}/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+          echo "CFLAGS=-g -I${TOOLCHAIN_DIR}/usr/local/include -L${TOOLCHAIN_DIR}/usr/local/lib -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
+          echo "CXXFLAGS=-g -I${TOOLCHAIN_DIR}/usr/local/include -L${TOOLCHAIN_DIR}/usr/local/lib -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
+          echo "LDFLAGS=-g -L${TOOLCHAIN_DIR}/usr/local/lib" >> $GITHUB_ENV
 
-      # You can add all your library builds below this
-      # (mbedtls, libusb, libplist, libimobiledevice, usbmuxd, palera1n, etc.)
+          echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
+          echo "PREFIX=/usr/local" >> $GITHUB_ENV
+          echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
+
+      # Continue with your regular build steps afterwards:
+      # - mbedtls build
+      # - libplist
+      # - libimobiledevice
+      # - usbmuxd
+      # - palera1n compile
