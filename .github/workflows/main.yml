@@ -1,3 +1,9 @@
+name: Build palera1n (Linux ARMEL only)
+
+on:
+  workflow_dispatch:
+
+jobs:
   build-Linux-armel:
     runs-on: ubuntu-latest
     env:
@@ -28,3 +34,49 @@
         run: |
           curl -u ${{ secrets.ACTIONS_RESOURCES_LOGIN }} -LO https://static.palera.in/action-resources/musl-cross/SHA512SUMS
           echo "TOOLCHAIN_CHECKSUM=$(grep armel-linux-musleabi-cross.tar.zst SHA512SUMS | cut -d' ' -f1)" >> $GITHUB_ENV
+
+      - name: Toolchain cache
+        id: toolchain_cache
+        uses: actions/cache@v3
+        with:
+          path: "armel-linux-musleabi-cross*.zst"
+          key: armel-linux-musleabi-${{ env.TOOLCHAIN_CHECKSUM }}
+
+      - name: Download toolchain
+        if: steps.toolchain_cache.outputs.cache-hit != 'true'
+        run: |
+          curl -u ${{ secrets.ACTIONS_RESOURCES_LOGIN }} -LO \
+            https://static.palera.in/action-resources/musl-cross/armel-linux-musleabi-cross.tar.zst
+
+      - name: List downloaded files
+        run: ls -lh .
+
+      - name: Extract toolchain
+        run: |
+          tar --zstd -xf armel-linux-musleabi-cross*.zst
+
+      - name: Setup environment
+        run: |
+          mkdir sysroot
+          echo "$(pwd)/armel-linux-musleabi-cross/bin" >> $GITHUB_PATH
+
+          echo "CHECKRA1N_NAME=linux-armel" >> $GITHUB_ENV
+          echo "ARCH_NAME=armel" >> $GITHUB_ENV
+
+          echo "PKG_CONFIG_PATH=$(pwd)/sysroot/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+          echo "CFLAGS=-g -fdata-sections -ffunction-sections -I$(pwd)/sysroot/usr/local/include -L$(pwd)/sysroot/usr/local/lib -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64" >> $GITHUB_ENV
+          echo "CXXFLAGS=$CFLAGS" >> $GITHUB_ENV
+          echo "LDFLAGS=-g -Wl,--gc-sections -fdata-sections -ffunction-sections -L$(pwd)/sysroot/usr/local/lib" >> $GITHUB_ENV
+          echo "INSTALL=$(command -v install) --strip-program=armel-linux-musleabi-strip" >> $GITHUB_ENV
+          echo "DESTDIR=$(pwd)/sysroot" >> $GITHUB_ENV
+          echo "PREFIX=/usr/local" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=armel-linux-musleabi-" >> $GITHUB_ENV
+          echo "CONFIGURE_ARGS=--build=x86_64-linux-gnu --host=armel-linux-musleabi --prefix=/usr/local --disable-shared --enable-static" >> $GITHUB_ENV
+
+      - name: Check dependencies cache
+        run: |
+          echo "target: armel-linux-musleabi" > cache.txt
+          echo "mbedtls ${{ env.MBEDTLS_VERSION }}" >> cache.txt
+          echo "readline ${{ env.READLINE_VERSION }}" >> cache.txt
+          echo "libimobiledevice ${{ env.LIBIMOBILEDEVICE_COMMIT }}" >> cache.txt
+          echo "lib
